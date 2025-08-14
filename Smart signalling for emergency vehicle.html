@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Ambulance Route Planner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      height: 100vh;
+      font-family: Arial, sans-serif;
+    }
+    #map {
+      flex: 2;
+      height: 100%;
+    }
+    #panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      box-sizing: border-box;
+      background: #f8f8f8;
+      border-left: 1px solid #ccc;
+    }
+    input, button {
+      margin-bottom: 5px;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 0;
+      font-size: 14px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    button {
+      cursor: pointer;
+      background: #007bff;
+      color: white;
+      border: none;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .location-input {
+      position: relative;
+    }
+    .location-input img {
+      position: absolute;
+      right: 8px;
+      top: 8px;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+    #directionsPanel {
+      flex: 1;
+      overflow-y: auto;
+      margin-top: 10px;
+      border-top: 1px solid #ccc;
+      padding-top: 5px;
+    }
+    .step {
+      padding: 6px;
+      border-bottom: 1px solid #ddd;
+      cursor: pointer;
+    }
+    .step:hover {
+      background: #eee;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="panel">
+    <h3>Plan Route</h3>
+    <div class="location-input">
+      <input id="origin" type="text" placeholder="Enter origin" />
+      <img src="https://upload.wikimedia.org/wikipedia/commons/e/ec/RedDot.svg" title="Use My Location" onclick="useMyLocation('origin')" />
+    </div>
+    <input id="destination" type="text" placeholder="Enter destination" />
+    <button onclick="calculateAndDisplayRoute()">Plan Route</button>
+    <div id="eta"></div>
+    <div id="directionsPanel"></div>
+  </div>
+
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDYIMJodsCyXOuq2qxkpwypm36dnxXeOd0&libraries=places,geometry"></script>
+  <script>
+    let map, directionsService, directionsRenderer, trafficLightMarkers = [];
+
+    function initMap() {
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 12.9716, lng: 77.5946 },
+        zoom: 13,
+      });
+
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer({
+        suppressMarkers: false
+      });
+      directionsRenderer.setMap(map);
+
+      // Enable place autocomplete (Google Maps style)
+      new google.maps.places.Autocomplete(document.getElementById("origin"));
+      new google.maps.places.Autocomplete(document.getElementById("destination"));
+    }
+
+    function useMyLocation(inputId) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((pos) => {
+          const latlng = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          const geocoder = new google.maps.Geocoder();
+          geocoder.geocode({ location: latlng }, (results, status) => {
+            if (status === "OK" && results[0]) {
+              document.getElementById(inputId).value = results[0].formatted_address;
+            } else {
+              alert("Unable to fetch location name.");
+            }
+          });
+        });
+      }
+    }
+
+    function calculateAndDisplayRoute() {
+      const origin = document.getElementById("origin").value;
+      const destination = document.getElementById("destination").value;
+
+      directionsService.route(
+        {
+          origin: origin,
+          destination: destination,
+          travelMode: google.maps.TravelMode.DRIVING
+        },
+        (response, status) => {
+          if (status === "OK") {
+            directionsRenderer.setDirections(response);
+            const route = response.routes[0];
+            document.getElementById("eta").innerHTML = "<b>ETA:</b> " + route.legs[0].duration.text;
+            showSteps(route.legs[0].steps);
+            placeTrafficLights(route.overview_path);
+          } else {
+            alert("Route request failed: " + status);
+          }
+        }
+      );
+    }
+
+    function showSteps(steps) {
+      const panel = document.getElementById("directionsPanel");
+      panel.innerHTML = "";
+      steps.forEach((step, index) => {
+        const div = document.createElement("div");
+        div.className = "step";
+        div.innerHTML = (index + 1) + ". " + step.instructions + " (" + step.distance.text + ")";
+        div.onclick = () => {
+          map.setCenter(step.start_location);
+          map.setZoom(18);
+        };
+        panel.appendChild(div);
+      });
+    }
+
+    function placeTrafficLights(path) {
+      trafficLightMarkers.forEach(m => m.setMap(null));
+      trafficLightMarkers = [];
+      let distance = 0;
+      for (let i = 1; i < path.length; i++) {
+        let segmentDistance = google.maps.geometry.spherical.computeDistanceBetween(path[i - 1], path[i]);
+        distance += segmentDistance;
+        if (distance >= 500) {
+          let marker = new google.maps.Marker({
+            position: path[i],
+            map: map,
+            icon: {
+              url: "traffic.jpg", // Your local traffic signal image
+              scaledSize: new google.maps.Size(24, 24)
+            }
+          });
+          trafficLightMarkers.push(marker);
+          distance = 0;
+        }
+      }
+    }
+
+    window.onload = initMap;
+  </script>
+</body>
+</html>

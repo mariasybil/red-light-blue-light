@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emergency Services Route Planner</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f0f0f0;
+    }
+    #map {
+      height: 60vh;
+      width: 100%;
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+    }
+    #controls {
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap; /* Allow wrapping for smaller screens */
+    }
+    #controls input, #controls select {
+      padding: 10px;
+      width: 200px; /* Reduced width to accommodate new select */
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    #controls button {
+      padding: 10px 20px;
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    #controls button:hover:enabled {
+      background-color: #1557b0;
+    }
+    #controls button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    #directions {
+      max-width: 600px;
+      padding: 15px;
+      background-color: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #directions h3 {
+      margin-top: 0;
+      font-size: 18px;
+    }
+    #directions p#estimated-time {
+      font-size: 16px;
+      font-weight: bold;
+      margin: 10px 0;
+      color: #333;
+    }
+    #directions ul {
+      list-style: none;
+      padding: 0;
+    }
+    #directions li {
+      margin-bottom: 12px;
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+    }
+    #directions li:hover {
+      background-color: #f8f8f8;
+    }
+    .pac-container {
+      font-family: Arial, sans-serif;
+      border-radius: 4px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    .pac-item {
+      padding: 10px;
+      font-size: 14px;
+    }
+    .pac-item:hover {
+      background-color: #f8f8f8;
+    }
+    @media (max-width: 600px) {
+      #controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      #controls input, #controls select {
+        width: 100%;
+        margin-bottom: 10px;
+      }
+      #controls button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <input type="text" id="start" placeholder="Enter starting point" aria-label="Starting point">
+    <input type="text" id="end" placeholder="Enter destination" aria-label="Destination">
+    <select id="travel-mode" aria-label="Emergency vehicle type">
+      <option value="AMBULANCE">Ambulance</option>
+      <option value="POLICE">Police Convoy</option>
+      <option value="FIRE">Fire Rescue</option>
+    </select>
+    <select id="priority-level" aria-label="Priority level">
+      <option value="HIGH">High</option>
+      <option value="MODERATE">Moderate</option>
+      <option value="LOW">Low</option>
+    </select>
+    <button onclick="calculateRoute()" aria-label="Get directions">Get Directions</button>
+    <button onclick="clearRoute()" aria-label="Clear route">Clear Route</button>
+  </div>
+  <div id="map"></div>
+  <div id="directions">
+    <h3>Turn-by-Turn Directions</h3>
+    <p id="estimated-time"></p>
+    <ul id="direction-list"></ul>
+  </div>
+
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDYIMJodsCyXOuq2qxkpwypm36dnxXeOd0&libraries=places&callback=initMap" async defer></script>
+  <script>
+    let map, directionsService, directionsRenderer;
+    const stepMarkers = [];
+
+    function initMap() {
+      map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 40.7128, lng: -74.0060 },
+        zoom: 12
+      });
+
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer();
+      directionsRenderer.setMap(map);
+
+      const startInput = document.getElementById('start');
+      const endInput = document.getElementById('end');
+      const autocompleteOptions = {
+        types: ['geocode'],
+        fields: ['place_id', 'name', 'geometry']
+      };
+
+      const startAutocomplete = new google.maps.places.Autocomplete(startInput, autocompleteOptions);
+      const endAutocomplete = new google.maps.places.Autocomplete(endInput, autocompleteOptions);
+
+      startAutocomplete.bindTo('bounds', map);
+      endAutocomplete.bindTo('bounds', map);
+
+      // Validate inputs on change and blur
+      const validateInput = (input, autocomplete) => {
+        const place = autocomplete.getPlace();
+        if (!place || !place.geometry) {
+          input.value = '';
+          alert(Please select a valid ${input.id} location from the suggestions);
+        } else {
+          map.setCenter(place.geometry.location);
+        }
+      };
+
+      startAutocomplete.addListener('place_changed', debounce(() => validateInput(startInput, startAutocomplete), 300));
+      endAutocomplete.addListener('place_changed', debounce(() => validateInput(endInput, endAutocomplete), 300));
+      startInput.addEventListener('blur', () => validateInput(startInput, startAutocomplete));
+      endInput.addEventListener('blur', () => validateInput(endInput, endAutocomplete));
+    }
+
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+
+    function calculateRoute() {
+      const start = document.getElementById('start').value;
+      const end = document.getElementById('end').value;
+      const travelMode = document.getElementById('travel-mode').value;
+      const priorityLevel = document.getElementById('priority-level').value;
+
+      if (!start || !end) {
+        alert('Please enter both starting point and destination.');
+        return;
+      }
+
+      const button = document.querySelector('#controls button:first-of-type');
+      button.disabled = true;
+      button.textContent = 'Loading...';
+
+      try {
+        directionsService.route(
+          {
+            origin: start,
+            destination: end,
+            travelMode: google.maps.TravelMode.DRIVING // Map all emergency modes to DRIVING
+          },
+          (result, status) => {
+            button.disabled = false;
+            button.textContent = 'Get Directions';
+            if (status === google.maps.DirectionsStatus.OK) {
+              directionsRenderer.setDirections(result);
+              displayDirections(result.routes[0], travelMode, priorityLevel);
+            } else {
+              const errorMessages = {
+                NOT_FOUND: 'One or more locations could not be found.',
+                ZERO_RESULTS: 'No route could be calculated.',
+                MAX_WAYPOINTS_EXCEEDED: 'Too many waypoints specified.',
+                REQUEST_DENIED: 'Request denied by Google Maps API.',
+                INVALID_REQUEST: 'Invalid request parameters.',
+                OVER_QUERY_LIMIT: 'API query limit exceeded. Try again later.'
+              };
+              alert(errorMessages[status] || Error fetching directions: ${status});
+            }
+          }
+        );
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = 'Get Directions';
+        alert('Network error occurred. Please try again.');
+      }
+    }
+
+    function displayDirections(route, travelMode, priorityLevel) {
+      const directionList = document.getElementById('direction-list');
+      const estimatedTimeElement = document.getElementById('estimated-time');
+      stepMarkers.forEach(marker => marker.setMap(null));
+      stepMarkers.length = 0;
+      directionList.innerHTML = '';
+      estimatedTimeElement.textContent = '';
+      let stepCount = 1;
+
+      // Calculate total duration
+      let totalDurationSeconds = 0;
+      route.legs.forEach(leg => {
+        totalDurationSeconds += leg.duration.value; // Duration in seconds
+      });
+      const hours = Math.floor(totalDurationSeconds / 3600);
+      const minutes = Math.floor((totalDurationSeconds % 3600) / 60);
+      const durationText = hours > 0 
+        ? ${hours} hour${hours > 1 ? 's' : ''} ${minutes} minute${minutes !== 1 ? 's' : ''}
+        : ${minutes} minute${minutes !== 1 ? 's' : ''};
+      estimatedTimeElement.textContent = Estimated time: ${durationText};
+
+      // Map vehicle type and priority level
+      const vehicleType = {
+        AMBULANCE: 'Ambulance',
+        POLICE: 'Police Convoy',
+        FIRE: 'Fire Rescue'
+      }[travelMode] || 'Emergency Vehicle';
+      const priorityText = {
+        HIGH: 'High Priority',
+        MODERATE: 'Moderate Priority',
+        LOW: 'Low Priority'
+      }[priorityLevel] || 'Unknown Priority';
+
+      route.legs.forEach(leg => {
+        leg.steps.forEach(step => {
+          const li = document.createElement('li');
+          li.innerHTML = <strong>Step ${stepCount} (${vehicleType}, ${priorityText}):</strong> ${step.instructions} (${step.distance.text}, ${step.duration.text});
+          li.dataset.lat = step.end_location.lat();
+          li.dataset.lng = step.end_location.lng();
+          directionList.appendChild(li);
+
+          const marker = new google.maps.Marker({
+            position: step.end_location,
+            map: map,
+            title: Step ${stepCount} (${vehicleType}, ${priorityText}),
+            label: ${stepCount}
+          });
+          stepMarkers.push(marker);
+
+          li.addEventListener('click', () => {
+            map.setCenter({ lat: parseFloat(li.dataset.lat), lng: parseFloat(li.dataset.lng) });
+            map.setZoom(15);
+          });
+
+          stepCount++;
+        });
+      });
+
+      const bounds = new google.maps.LatLngBounds();
+      route.legs.forEach(leg => {
+        leg.steps.forEach(step => {
+          bounds.extend(step.start_location);
+          bounds.extend(step.end_location);
+        });
+      });
+      map.fitBounds(bounds);
+    }
+
+    function clearRoute() {
+      directionsRenderer.setDirections({ routes: [] });
+      stepMarkers.forEach(marker => marker.setMap(null));
+      stepMarkers.length = 0;
+      document.getElementById('direction-list').innerHTML = '';
+      document.getElementById('estimated-time').textContent = '';
+      document.getElementById('start').value = '';
+      document.getElementById('end').value = '';
+      document.getElementById('travel-mode').value = 'AMBULANCE';
+      document.getElementById('priority-level').value = 'HIGH';
+      map.setCenter({ lat: 40.7128, lng: -74.0060 });
+      map.setZoom(12);
+    }
+  </script>
+</body>
+</html>
